@@ -30,8 +30,6 @@ async function conectar() {
     }
 
     if (connection === 'close') {
-      let motivo = new Intl.DateTimeFormat('es', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).format(new Date());
-      
       if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
         conectar();
       } else {
@@ -57,7 +55,9 @@ async function conectar() {
     console.log(`📨 [${esGrupo ? 'GRUPO' : 'PRIVADO'}] ${nombreRemitente}: ${texto}`);
 
     // Procesar comandos
-    await procesarComandos(texto, remitente, sock, mensaje);
+    if (texto.startsWith('!')) {
+      await procesarComandos(texto, remitente, sock, mensaje);
+    }
   });
 }
 
@@ -70,6 +70,7 @@ async function procesarComandos(texto, remitente, sock, mensaje) {
     if (cmd.nombre === comando) {
       try {
         await cmd.ejecutar(sock, remitente, args.slice(1), mensaje);
+        console.log(`✅ Comando ejecutado: ${comando}`);
       } catch (error) {
         console.error(`❌ Error en comando ${comando}:`, error);
         await sock.sendMessage(remitente, { text: `❌ Error al ejecutar el comando: ${error.message}` });
