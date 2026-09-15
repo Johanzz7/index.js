@@ -4,9 +4,9 @@
   "description": "Bot de WhatsApp para gestión de clan esports",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
-  },
+  "start": "node index.js"
+}
+  }
   "keywords": [
     "whatsapp",
     "bot",
