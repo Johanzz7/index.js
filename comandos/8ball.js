@@ -1,26 +1,43 @@
-const { enviarMensaje } = require('../utils');
+const { formatearMensaje } = require('../utils');
 
 module.exports = {
-  nombre: '!8ball',
-  descripcion: 'Haz una pregunta y recibe una respuesta mística',
-  async ejecutar(socket, chat, args, mensaje) {
+  nome: '8ball',
+  alias: ['pregunta', 'magic'],
+  descricao: 'Hacer una pregunta a la bola mágica',
+  uso: '!8ball <pregunta>',
+  
+  async executar(socket, chat, args, remitente, mensagem) {
+    if (args.length === 0) {
+      return socket.sendMessage(chat, {
+        text: formatearMensaje('❌ ERROR', `
+┃ Usa: !8ball <tu pregunta>
+        `.trim())
+      });
+    }
+
     const respuestas = [
-      '✅ Sí, definitivamente',
-      '✅ Es seguro que sí',
-      '✅ Parece que sí',
+      '✅ Definitivamente sí',
+      '✅ Es cierto',
+      '✅ Muy probable',
       '❓ Quizás',
-      '❓ No estoy seguro',
-      '❓ Puede ser',
-      '❌ No',
+      '❓ Pregunta más tarde',
       '❌ Definitivamente no',
-      '❌ No parece probable',
-      '⚠️ Mejor no preguntar',
-      '⚠️ Pregunta más tarde',
-      '⚠️ Concentríate y pregunta de nuevo'
+      '❌ No lo creo',
+      '❌ Imposible'
     ];
-    
+
     const respuesta = respuestas[Math.floor(Math.random() * respuestas.length)];
     
-    await enviarMensaje(socket, chat, `🔮 Bola 8 mágica dice:\n\n*${respuesta}*`);
+    const msg = `
+╭━━━ 🔮 BOLA MÁGICA 🔮 ━━━╮
+┃
+┃ 🤔 Pregunta: ${args.join(' ')}
+┃
+┃ 🔮 Respuesta: ${respuesta}
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━╯
+    `.trim();
+
+    socket.sendMessage(chat, { text: msg });
   }
 };
