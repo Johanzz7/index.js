@@ -1,16 +1,24 @@
-// Función para enviar mensaje con delay
+// Función para enviar mensajes
 async function enviarMensaje(socket, chat, texto, delay = 0) {
-  if (delay > 0) {
-    await new Promise(resolve => setTimeout(resolve, delay));
+  try {
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    await socket.sendMessage(chat, { text: texto });
+  } catch (error) {
+    console.error('❌ Error enviando mensaje:', error);
   }
-  await socket.sendMessage(chat, { text: texto });
 }
 
 // Función para enviar reacción
 async function enviarReaccion(socket, key, emoji) {
-  await socket.sendMessage(key.remoteJid, {
-    react: { text: emoji, key }
-  });
+  try {
+    await socket.sendMessage(key.remoteJid, {
+      react: { text: emoji, key }
+    });
+  } catch (error) {
+    console.error('❌ Error enviando reacción:', error);
+  }
 }
 
 // Función para obtener nombre del usuario
@@ -42,11 +50,65 @@ function obtenerUsuarioMencionado(mensaje) {
   return null;
 }
 
+// Función para formatear mensajes con emojis y símbolos
+function formatearMensaje(titulo, contenido, emoji = '🌸') {
+  return `
+╭━━━ ${emoji} ${titulo} ${emoji} ━━━╮
+${contenido}
+╰━━━━━━━━━━━━━━━━━━━━━━━━━╯
+  `.trim();
+}
+
+// Función para crear lista formateada
+function crearLista(items, emoji = '👤') {
+  return items.map((item) => `┃ ${emoji} ${item}`).join('\n');
+}
+
+// Función para separador
+function separador() {
+  return '━━━━━━━━━━━━━━━━━━━━━━━━━';
+}
+
+// Función para validar rol
+function esRolValido(rol, rolesPermitidos = ['IGL', 'Rifler', 'Support', 'Awper', 'Lurker']) {
+  return rolesPermitidos.includes(rol);
+}
+
+// Función para formatear perfil
+function formatearPerfil(miembro) {
+  return `
+┃ 👤 Nombre: ${miembro.nombre}
+┃ 🎮 Nick: ${miembro.nick}
+┃ 🎖️ Rol: ${miembro.rol}
+┃ ⭐ Puntos: ${miembro.puntos}
+┃ 🟢 Estado: ${miembro.estado}
+┃ 📅 Registro: ${miembro.fecha_registro}
+  `.trim();
+}
+
+// Función para crear tabla de ranking
+function crearTablaRanking(miembros) {
+  let tabla = '┃ 🏆 RANKING 🏆\n';
+  tabla += '┃\n';
+  miembros.slice(0, 10).forEach((m, i) => {
+    const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}️⃣`;
+    tabla += `┃ ${medalla} ${m.nombre} - ${m.puntos} pts\n`;
+  });
+  return tabla;
+}
+
+// Exportar todas las funciones
 module.exports = {
   enviarMensaje,
   enviarReaccion,
   obtenerNombre,
   esAdmin,
   esGrupo,
-  obtenerUsuarioMencionado
+  obtenerUsuarioMencionado,
+  formatearMensaje,
+  crearLista,
+  separador,
+  esRolValido,
+  formatearPerfil,
+  crearTablaRanking
 };
