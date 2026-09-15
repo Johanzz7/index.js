@@ -1,4 +1,4 @@
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
@@ -8,213 +8,219 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir);
 }
 
-const dbPath = path.join(dataDir, 'umi.db');
+const db = new Database(path.join(dataDir, 'bot.db'));
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('❌ Error al conectar con SQLite:', err);
-  } else {
-    console.log('✅ Base de datos SQLite conectada');
-    inicializarTablas();
-  }
-});
+// Crear tablas
+db.exec(`
+  CREATE TABLE IF NOT EXISTS miembros (
+    id TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    numero TEXT NOT NULL UNIQUE,
+    rango TEXT DEFAULT 'Lurker',
+    kills INTEGER DEFAULT 0,
+    deaths INTEGER DEFAULT 0,
+    warns INTEGER DEFAULT 0,
+    fecha_registro TEXT NOT NULL,
+    estado TEXT DEFAULT 'activo'
+  );
 
-// Inicializar tablas
-function inicializarTablas() {
-  db.serialize(() => {
-    // Tabla de miembros
-    db.run(`
-      CREATE TABLE IF NOT EXISTS miembros (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT UNIQUE NOT NULL,
-        nick TEXT NOT NULL,
-        rol TEXT NOT NULL,
-        puntos INTEGER DEFAULT 0,
-        estado TEXT DEFAULT 'activo',
-        fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS entrenamientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    hora TEXT NOT NULL,
+    descripcion TEXT,
+    asistentes TEXT,
+    estado TEXT DEFAULT 'pendiente'
+  );
 
-    // Tabla de warns
-    db.run(`
-      CREATE TABLE IF NOT EXISTS warns (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario TEXT NOT NULL,
-        razon TEXT,
-        cantidad INTEGER DEFAULT 1,
-        fecha DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS scrims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL,
+    hora TEXT NOT NULL,
+    rival TEXT NOT NULL,
+    resultado TEXT,
+    equipo_umi TEXT,
+    equipo_rival TEXT,
+    estado TEXT DEFAULT 'pendiente'
+  );
 
-    // Tabla de entrenamientos
-    db.run(`
-      CREATE TABLE IF NOT EXISTS entrenamientos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        dia TEXT NOT NULL,
-        hora TEXT NOT NULL,
-        sala TEXT
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS warns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    miembro_id TEXT NOT NULL,
+    razon TEXT NOT NULL,
+    admin_id TEXT NOT NULL,
+    fecha TEXT NOT NULL,
+    FOREIGN KEY (miembro_id) REFERENCES miembros(id)
+  );
 
-    // Tabla de scrims
-    db.run(`
-      CREATE TABLE IF NOT EXISTS scrims (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT NOT NULL,
-        hora TEXT NOT NULL,
-        sala TEXT NOT NULL,
-        estado TEXT DEFAULT 'pendiente',
-        resultado TEXT
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS anuncios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo TEXT NOT NULL,
+    contenido TEXT NOT NULL,
+    admin_id TEXT NOT NULL,
+    fecha TEXT NOT NULL,
+    importancia TEXT DEFAULT 'normal'
+  );
 
-    // Tabla de roster
-    db.run(`
-      CREATE TABLE IF NOT EXISTS roster (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        jugador TEXT NOT NULL,
-        posicion INTEGER,
-        tipo TEXT DEFAULT 'titular'
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS configuracion (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
+  );
+`);
 
-    // Tabla de configuración
-    db.run(`
-      CREATE TABLE IF NOT EXISTS config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        clave TEXT UNIQUE NOT NULL,
-        valor TEXT
-      )
-    `);
+console.log('✅ Base de datos inicializada con better-sqlite3');
 
-    console.log('📊 Tablas inicializadas correctamente');
-  });
-}
-
-// Funciones auxiliares
-const database = {
+module.exports = {
+  db,
+  
   // Miembros
-  registrarMiembro: (nombre, nick, rol, callback) => {
-    db.run(
-      `INSERT INTO miembros (nombre, nick, rol) VALUES (?, ?, ?)`,
-      [nombre, nick, rol],
-      callback
-    );
+  agregarMiembro: (id, nombre, numero, rango = 'Lurker') => {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO miembros (id, nombre, numero, rango, fecha_registro)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, nombre, numero, rango, new Date().toISOString());
+      return true;
+    } catch (e) {
+      console.error('❌ Error agregando miembro:', e);
+      return false;
+    }
   },
 
-  obtenerMiembro: (nombre, callback) => {
-    db.get(`SELECT * FROM miembros WHERE nombre = ?`, [nombre], callback);
+  obtenerMiembros: () => {
+    try {
+      return db.prepare('SELECT * FROM miembros WHERE estado = "activo" ORDER BY rango DESC').all();
+    } catch (e) {
+      console.error('❌ Error obteniendo miembros:', e);
+      return [];
+    }
   },
 
-  obtenerTodosMiembros: (callback) => {
-    db.all(`SELECT * FROM miembros ORDER BY puntos DESC`, callback);
+  obtenerMiembro: (id) => {
+    try {
+      return db.prepare('SELECT * FROM miembros WHERE id = ?').get(id);
+    } catch (e) {
+      console.error('❌ Error obteniendo miembro:', e);
+      return null;
+    }
   },
 
-  actualizarPuntos: (nombre, puntos, callback) => {
-    db.run(
-      `UPDATE miembros SET puntos = puntos + ? WHERE nombre = ?`,
-      [puntos, nombre],
-      callback
-    );
+  actualizarRango: (id, rango) => {
+    try {
+      db.prepare('UPDATE miembros SET rango = ? WHERE id = ?').run(rango, id);
+      return true;
+    } catch (e) {
+      console.error('❌ Error actualizando rango:', e);
+      return false;
+    }
   },
 
-  eliminarMiembro: (nombre, callback) => {
-    db.run(`DELETE FROM miembros WHERE nombre = ?`, [nombre], callback);
+  agregarWarn: (miembroId, razon, adminId) => {
+    try {
+      db.prepare(`
+        INSERT INTO warns (miembro_id, razon, admin_id, fecha)
+        VALUES (?, ?, ?, ?)
+      `).run(miembroId, razon, adminId, new Date().toISOString());
+      
+      const warns = db.prepare('SELECT COUNT(*) as total FROM warns WHERE miembro_id = ?').get(miembroId);
+      
+      if (warns.total >= 3) {
+        db.prepare('UPDATE miembros SET estado = ? WHERE id = ?').run('expulsado', miembroId);
+        return { expulsado: true, warns: warns.total };
+      }
+      
+      return { expulsado: false, warns: warns.total };
+    } catch (e) {
+      console.error('❌ Error agregando warn:', e);
+      return null;
+    }
   },
 
-  cambiarEstado: (nombre, estado, callback) => {
-    db.run(
-      `UPDATE miembros SET estado = ? WHERE nombre = ?`,
-      [estado, nombre],
-      callback
-    );
-  },
-
-  cambiarRol: (nombre, rol, callback) => {
-    db.run(
-      `UPDATE miembros SET rol = ? WHERE nombre = ?`,
-      [rol, nombre],
-      callback
-    );
-  },
-
-  // Warns
-  agregarWarn: (usuario, razon, callback) => {
-    db.run(
-      `INSERT INTO warns (usuario, razon) VALUES (?, ?)`,
-      [usuario, razon],
-      callback
-    );
-  },
-
-  obtenerWarns: (usuario, callback) => {
-    db.get(
-      `SELECT SUM(cantidad) as total FROM warns WHERE usuario = ?`,
-      [usuario],
-      callback
-    );
-  },
-
-  eliminarWarn: (usuario, callback) => {
-    db.run(`DELETE FROM warns WHERE usuario = ?`, [usuario], callback);
+  obtenerWarns: (miembroId) => {
+    try {
+      return db.prepare('SELECT * FROM warns WHERE miembro_id = ? ORDER BY fecha DESC').all(miembroId);
+    } catch (e) {
+      console.error('❌ Error obteniendo warns:', e);
+      return [];
+    }
   },
 
   // Entrenamientos
-  agregarEntrenamiento: (dia, hora, sala, callback) => {
-    db.run(
-      `INSERT INTO entrenamientos (dia, hora, sala) VALUES (?, ?, ?)`,
-      [dia, hora, sala],
-      callback
-    );
+  agregarEntrenamiento: (fecha, hora, descripcion) => {
+    try {
+      db.prepare(`
+        INSERT INTO entrenamientos (fecha, hora, descripcion)
+        VALUES (?, ?, ?)
+      `).run(fecha, hora, descripcion);
+      return true;
+    } catch (e) {
+      console.error('❌ Error agregando entrenamiento:', e);
+      return false;
+    }
   },
 
-  obtenerEntrenamientos: (callback) => {
-    db.all(`SELECT * FROM entrenamientos`, callback);
+  obtenerEntrenamientos: () => {
+    try {
+      return db.prepare('SELECT * FROM entrenamientos ORDER BY fecha DESC').all();
+    } catch (e) {
+      console.error('❌ Error obteniendo entrenamientos:', e);
+      return [];
+    }
   },
 
   // Scrims
-  crearScrim: (fecha, hora, sala, callback) => {
-    db.run(
-      `INSERT INTO scrims (fecha, hora, sala) VALUES (?, ?, ?)`,
-      [fecha, hora, sala],
-      callback
-    );
+  agregarScrim: (fecha, hora, rival) => {
+    try {
+      db.prepare(`
+        INSERT INTO scrims (fecha, hora, rival)
+        VALUES (?, ?, ?)
+      `).run(fecha, hora, rival);
+      return true;
+    } catch (e) {
+      console.error('❌ Error agregando scrim:', e);
+      return false;
+    }
   },
 
-  obtenerScrims: (callback) => {
-    db.all(`SELECT * FROM scrims WHERE estado = 'pendiente'`, callback);
+  obtenerScrims: () => {
+    try {
+      return db.prepare('SELECT * FROM scrims ORDER BY fecha DESC').all();
+    } catch (e) {
+      console.error('❌ Error obteniendo scrims:', e);
+      return [];
+    }
   },
 
-  // Roster
-  agregarAlRoster: (jugador, posicion, tipo, callback) => {
-    db.run(
-      `INSERT INTO roster (jugador, posicion, tipo) VALUES (?, ?, ?)`,
-      [jugador, posicion, tipo],
-      callback
-    );
+  // Anuncios
+  agregarAnuncio: (titulo, contenido, adminId, importancia = 'normal') => {
+    try {
+      db.prepare(`
+        INSERT INTO anuncios (titulo, contenido, admin_id, fecha, importancia)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(titulo, contenido, adminId, new Date().toISOString(), importancia);
+      return true;
+    } catch (e) {
+      console.error('❌ Error agregando anuncio:', e);
+      return false;
+    }
   },
 
-  obtenerRoster: (callback) => {
-    db.all(`SELECT * FROM roster ORDER BY posicion`, callback);
+  obtenerAnuncios: () => {
+    try {
+      return db.prepare('SELECT * FROM anuncios ORDER BY fecha DESC LIMIT 10').all();
+    } catch (e) {
+      console.error('❌ Error obteniendo anuncios:', e);
+      return [];
+    }
   },
 
-  // Configuración
-  establecerConfig: (clave, valor, callback) => {
-    db.run(
-      `INSERT OR REPLACE INTO config (clave, valor) VALUES (?, ?)`,
-      [clave, valor],
-      callback
-    );
-  },
-
-  obtenerConfig: (clave, callback) => {
-    db.get(`SELECT valor FROM config WHERE clave = ?`, [clave], callback);
-  },
-
-  // Cierre
   cerrar: () => {
-    db.close();
+    try {
+      db.close();
+      console.log('✅ Base de datos cerrada');
+    } catch (e) {
+      console.error('❌ Error cerrando base de datos:', e);
+    }
   }
 };
-
-module.exports = database;
