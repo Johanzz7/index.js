@@ -1,83 +1,104 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
+const db = require('./database');
 
-// Importar comandos
-const comandos = require('./comandos');
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  headless: true
+});
 
-let sock;
+// Cargar todos los comandos
+const comandos = new Map();
+const comandosDir = path.join(__dirname, 'comandos');
 
-async function conectar() {
-  const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-
-  sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-  });
-
-  // Mostrar código QR
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log('📱 Escanea este código QR con WhatsApp:');
-      qrcode.generate(qr, { small: true });
-    }
-
-    if (connection === 'open') {
-      console.log('✅ Bot conectado a WhatsApp');
-    }
-
-    if (connection === 'close') {
-      if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-        conectar();
-      } else {
-        console.log('❌ WhatsApp cerró sesión. Debes volver a conectarte.');
+if (fs.existsSync(comandosDir)) {
+  const archivos = fs.readdirSync(comandosDir).filter(file => file.endsWith('.js'));
+  
+  archivos.forEach(archivo => {
+    try {
+      const comando = require(path.join(comandosDir, archivo));
+      comandos.set(comando.nome, comando);
+      
+      if (comando.alias && Array.isArray(comando.alias)) {
+        comando.alias.forEach(alias => {
+          comandos.set(alias, comando);
+        });
       }
-    }
-  });
-
-  // Guardar credenciales
-  sock.ev.on('creds.update', saveCreds);
-
-  // Escuchar mensajes
-  sock.ev.on('messages.upsert', async (m) => {
-    const mensaje = m.messages[0];
-
-    if (!mensaje.message) return;
-
-    const remitente = mensaje.key.remoteJid;
-    const esGrupo = remitente.includes('@g.us');
-    const texto = mensaje.message.conversation || mensaje.message.extendedTextMessage?.text || '';
-    const nombreRemitente = mensaje.pushName;
-
-    console.log(`📨 [${esGrupo ? 'GRUPO' : 'PRIVADO'}] ${nombreRemitente}: ${texto}`);
-
-    // Procesar comandos
-    if (texto.startsWith('!')) {
-      await procesarComandos(texto, remitente, sock, mensaje);
+      console.log(`✅ Comando cargado: ${comando.nome}`);
+    } catch (e) {
+      console.error(`❌ Error cargando ${archivo}:`, e.message);
     }
   });
 }
 
-async function procesarComandos(texto, remitente, sock, mensaje) {
-  const args = texto.trim().split(' ');
-  const comando = args[0].toLowerCase();
+client.on('qr', qr => {
+  console.log('\n📱 Escanea este código QR con WhatsApp:\n');
+  qrcode.generate(qr, { small: true });
+  console.log('\n');
+});
 
-  // Buscar si existe el comando
-  for (const cmd of comandos) {
-    if (cmd.nombre === comando) {
-      try {
-        await cmd.ejecutar(sock, remitente, args.slice(1), mensaje);
-        console.log(`✅ Comando ejecutado: ${comando}`);
-      } catch (error) {
-        console.error(`❌ Error en comando ${comando}:`, error);
-        await sock.sendMessage(remitente, { text: `❌ Error al ejecutar el comando: ${error.message}` });
-      }
-      return;
+client.on('ready', () => {
+  console.log('✅ Bot conectado a WhatsApp!');
+  console.log(`📚 ${comandos.size} comandos cargados`);
+});
+
+client.on('message_create', async (message) => {
+  try {
+    // Ignorar mensajes del bot
+    if (message.fromMe) return;
+    
+    const prefix = process.env.PREFIX || '!';
+    const contenido = message.body.trim();
+    
+    // Verificar si es un comando
+    if (!contenido.startsWith(prefix)) return;
+    
+    // Parsear comando
+    const args = contenido.slice(prefix.length).trim().split(/\s+/);
+    const nombreComando = args.shift().toLowerCase();
+    
+    // Buscar comando
+    const comando = comandos.get(nombreComando);
+    if (!comando) {
+      return message.reply('❌ Comando no encontrado. Usa *!ayuda* para ver todos los comandos.');
     }
+    
+    // Verificar permisos de admin
+    if (comando.admin) {
+      const admins = process.env.ADMINS ? process.env.ADMINS.split(',') : [];
+      const isAdmin = message.author && admins.includes(message.author);
+      
+      if (!isAdmin) {
+        return message.reply('❌ Solo administradores pueden usar este comando.');
+      }
+    }
+    
+    // Ejecutar comando
+    const chat = await message.getChat();
+    await comando.executar(client, chat, args, message.from, message);
+    
+  } catch (error) {
+    console.error('❌ Error procesando mensaje:', error);
+    message.reply('❌ Ocurrió un error al procesar tu comando.');
   }
-}
+});
 
-conectar().catch(console.log);
+client.on('disconnected', (reason) => {
+  console.log('🔌 Bot desconectado:', reason);
+  process.exit(1);
+});
+
+client.initialize().catch(err => {
+  console.error('❌ Error iniciando bot:', err);
+  process.exit(1);
+});
+
+process.on('SIGINT', () => {
+  console.log('\n👋 Cerrando bot...');
+  client.destroy();
+  db.cerrar();
+  process.exit(0);
+});
